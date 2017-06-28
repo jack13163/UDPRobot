@@ -3,6 +3,8 @@
 
 #pragma comment(lib, "ws2_32.lib") 
 
+const char tmp[255] = "这个问题好难，你可以提示下吗？（Y/N）";
+
 int main(int argc, char* argv[])
 {
     WSADATA wsaData;
@@ -10,6 +12,7 @@ int main(int argc, char* argv[])
     WORD sockVersion = MAKEWORD(2,2);
 	//声明函数
 	char* Search(char* path, char* tosearch);
+	void appendtofile(char* path, char* towrite);
 		
 	//智能语料库
 	char * filepath = "C:\\data.txt";
@@ -47,6 +50,9 @@ int main(int argc, char* argv[])
 
 	printf("服务端已启动，等待客户端请求...\n");
 
+	//记录控制开关
+	bool flag = false;
+
     while (true)
     {
 		//接收到的请求数据
@@ -63,28 +69,157 @@ int main(int argc, char* argv[])
             recvData[ret] = 0x00;
 			
 			//将一个十进制网络字节序转换为点分十进制IP格式的字符串
-            printf("接受到一个来自%s的连接...\n", inet_ntoa(remoteAddr.sin_addr));
-            printf("客户端：%s\n", recvData);          
+            printf("%s: %s\n", inet_ntoa(remoteAddr.sin_addr), recvData);          
         }
 
 		//查找答复
-		strcat(sendData,Search(filepath, recvData));
+		strcpy(sendData,Search(filepath, recvData));
 
 		//答复长度
 		int len = strlen(sendData);
-
-		//发送(应答)数据
-        sendto(serSocket, sendData, len, 0, (sockaddr *)&remoteAddr, nAddrLen);    
-
+			
+		//发送消息
+		sendto(serSocket, sendData, len, 0, (sockaddr *)&remoteAddr, nAddrLen);
+		
 		//打印服务端提示
-		printf("服务端：%s", sendData);
+		printf("服务端：%s\n", sendData);
+
+		//判断是否查找到回复
+		if(strcmp(sendData, tmp)==0)
+		{
+			flag = true;
+		}
+
+		//记录
+		if(flag)
+		{
+			//记下问题
+			char record[255] = {'\0'};
+			strcpy(record, recvData);
+			strcat(record, "\t");
+
+			while(true)
+			{
+				//初始化
+				for(int i=0;i<255;i++)
+				{
+					recvData[i] = '\0';
+				}
+
+				//接收是否记录确认
+				int ret = recvfrom(serSocket, recvData, 255, 0, (sockaddr *)&remoteAddr, &nAddrLen);
+				//接收到一个消息
+				if (ret > 0)
+				{
+					recvData[ret] = 0x00;
+					
+					//将一个十进制网络字节序转换为点分十进制IP格式的字符串
+					printf("%s: %s\n", inet_ntoa(remoteAddr.sin_addr), recvData);       
+				}
+				
+				//确认记录
+				if(strcmp(recvData,"Y")==0 || strcmp(recvData,"y")==0)
+				{
+					//给出提示
+					strcpy(sendData, "请输入对应的回答奥");
+					
+					//答复长度
+					int len = strlen(sendData);
+					
+					//发送消息
+					sendto(serSocket, sendData, len, 0, (sockaddr *)&remoteAddr, nAddrLen);
+					
+					//打印服务端提示
+					printf("服务端：%s\n", sendData);
+
+					//接收答案
+					int ret = recvfrom(serSocket, recvData, 255, 0, (sockaddr *)&remoteAddr, &nAddrLen);
+					//接收到答案
+					if (ret > 0)
+					{
+						recvData[ret] = 0x00;
+						
+						//将一个十进制网络字节序转换为点分十进制IP格式的字符串
+						printf("%s: %s\n", inet_ntoa(remoteAddr.sin_addr), recvData);       
+					}
+
+					//整理答案
+					strcat(record, recvData);
+					strcat(record, "\n");
+					
+					//确定后记录到文件
+					appendtofile(filepath, record);
+					
+					//查找答复
+					strcpy(sendData, "记录成功！");
+
+					//答复长度
+					len = strlen(sendData);
+				
+					//发送消息
+					sendto(serSocket, sendData, len, 0, (sockaddr *)&remoteAddr, nAddrLen);
+
+					//关闭开关
+					flag = false;
+
+					break;
+				}
+				else if(strcmp(recvData,"N")==0 || strcmp(recvData,"n")==0)
+				{
+					//查找答复
+					strcpy(sendData, "好吧");
+					printf("服务端：好吧\n");
+
+					//答复长度
+					len = strlen(sendData);
+				
+					//发送消息
+					sendto(serSocket, sendData, len, 0, (sockaddr *)&remoteAddr, nAddrLen);
+
+					flag = false;
+
+					break;
+				}
+				else
+				{
+					//查找答复
+					strcpy(sendData, "请重新输入！");
+
+					//答复长度
+					len = strlen(sendData);
+				
+					//发送消息
+					sendto(serSocket, sendData, len, 0, (sockaddr *)&remoteAddr, nAddrLen);
+				}
+			}
+		}
     }
 
 	//关闭socket和wsa
-    closesocket(serSocket); 
+    closesocket(serSocket);
     WSACleanup();
 
     return 0;
+}
+
+//将记录追加到文件
+void appendtofile(char* path, char* towrite)
+{
+	FILE *pFile;
+	
+	//打开文件
+	if((pFile=fopen(path, "a"))==NULL) {
+		printf("文件不能打开！\n"); 
+		return;
+	}
+
+	int len = strlen(towrite);
+	//向文件写数据
+	fwrite (towrite , 1, len, pFile);
+
+	fflush(pFile);
+
+	fclose(pFile);
 }
 
 //查找答复
@@ -122,7 +257,7 @@ char* Search(char* path, char* tosearch)
 		int p = 0;
 		
 		//组织答复信息
-		for(int k=i;k<j+1;k++)
+		for(int k=i;k<j;k++)
 		{
 			if(src[k]=='\t')
 			{
@@ -143,7 +278,7 @@ char* Search(char* path, char* tosearch)
 		//默认答复
 		if(strlen(answer)<=0)
 		{
-			strcat(answer, "你说什么，我没听太懂\n");
+			strcat(answer, tmp);
 		}
 	}
 	else
@@ -157,7 +292,7 @@ char* Search(char* path, char* tosearch)
 //查找字符串中指定子串
 int StringFind(const char *pSrc, const char *pDst)  
 {  
-    int i, j;  
+    int i, j; 
 
 	//循环遍历字符串
     for (i=0; pSrc[i]!='\0'; i++) 
@@ -165,7 +300,9 @@ int StringFind(const char *pSrc, const char *pDst)
 		//字符串和子串开头不匹配，则继续进行下一步
         if(pSrc[i]!=pDst[0])  
             continue; 
-		
+		if(i > 0 && pSrc[i-1]!='\n')
+			continue;
+
 		//若字符串和子串开头匹配
         j = 0;
 
@@ -180,7 +317,7 @@ int StringFind(const char *pSrc, const char *pDst)
         }
 
 		//如果遍历到子串结尾，代表全部匹配成功，返回字符串中匹配的开始位置
-        if(pDst[j]=='\0')  
+        if(pDst[j]=='\0' && pSrc[i+j]=='\t')
             return i;  
     }  
 
